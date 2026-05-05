@@ -86,6 +86,14 @@ tr:hover td { background: var(--accent-dim); }
 .heatmap td { text-align: center; font-weight: 500; padding: 12px 8px; }
 .heatmap th { text-align: center; }
 .heatmap td:first-child { text-align: left; font-weight: 600; background: #fafbfc; }
+.sortable-th { cursor: pointer; user-select: none; }
+.sortable-th:hover { background: #2a2a40; }
+.sortable-th::after { content: " ↕"; opacity: 0.4; font-size: 10px; }
+.sortable-th.sorted-asc::after { content: " ↑"; opacity: 1; color: #AE821F; }
+.sortable-th.sorted-desc::after { content: " ↓"; opacity: 1; color: #AE821F; }
+.sat-low { background: rgba(211, 47, 47, 0.15); color: #b71c1c; font-weight: 600; }
+.sat-mid { background: rgba(245, 158, 11, 0.18); color: #92400e; font-weight: 600; }
+.sat-high { background: rgba(46, 125, 50, 0.18); color: #1b5e20; font-weight: 600; }
 
 /* SUBTABS */
 .subtab-buttons { display: flex; gap: 0; margin-bottom: 14px; flex-wrap: wrap; }
@@ -263,14 +271,19 @@ footer { text-align: center; padding: 24px; color: var(--text-muted); font-size:
     <strong>Obj./1k obyv.</strong> = roční saturace v kontextu (kolik zákazníků z 1 000 obyvatel u nás nakoupilo).
   </p>
   <div style="overflow-x:auto;">
-  <table>
+  <table id="mesta-table" class="sortable">
     <thead><tr>
-      <th>#</th><th>Město</th>
-      <th class="numeric">Obj.</th><th class="numeric">Podíl obj. %</th>
-      <th class="numeric">Obrat (Kč)</th><th class="numeric">Podíl obratu %</th>
-      <th class="numeric">Prům. košík</th><th class="numeric">Index košíku</th>
-      <th class="numeric">Populace</th><th class="numeric">Obj. / 1k obyv.</th>
-      <th class="numeric">Saturace</th>
+      <th data-sort="rank">#</th>
+      <th data-sort="mesto_norm" class="sortable-th">Město</th>
+      <th data-sort="pocet" class="numeric sortable-th sorted-desc">Obj.</th>
+      <th data-sort="podil_pocet" class="numeric sortable-th">Podíl obj. %</th>
+      <th data-sort="obrat" class="numeric sortable-th">Obrat (Kč)</th>
+      <th data-sort="podil_obrat" class="numeric sortable-th">Podíl obratu %</th>
+      <th data-sort="avg_kosik" class="numeric sortable-th">Prům. košík</th>
+      <th data-sort="kosik_index" class="numeric sortable-th">Index košíku</th>
+      <th data-sort="populace" class="numeric sortable-th">Populace</th>
+      <th data-sort="obj_per_1k" class="numeric sortable-th">Obj. / 1k obyv.</th>
+      <th data-sort="saturace_index" class="numeric sortable-th">Saturace</th>
     </tr></thead>
     <tbody id="tab-mesta"></tbody>
   </table>
@@ -561,27 +574,76 @@ function loadDashboard() {
     ' objednávek (' + (DATA.summary.city_mapped / (DATA.summary.city_mapped + DATA.summary.city_unmapped) * 100).toFixed(1) +
     ' %). Zbylé objednávky šly na adresu (Zásilkovna na adresu / GLS na adresu) bez parseable města.';
 
-  document.getElementById('tab-mesta').innerHTML = DATA.topMesta.map((m, i) => {
-    var idx = m.kosik_index, idxColor = idx >= 110 ? 'pos' : idx <= 90 ? 'neg' : '';
-    var sat = m.saturace_index;
-    var satColor = sat >= 1.3 ? 'pos' : sat != null && sat <= 0.7 ? 'neg' : '';
-    var satTxt = sat == null ? '—' : '<span class="' + satColor + '">' + fmtNum(sat, 2) + '×</span>';
-    var dispCmp = m.podil_obrat > m.podil_pocet ? 'pos' : m.podil_obrat < m.podil_pocet ? 'neg' : '';
-    var pop = m.populace == null ? '—' : fmtCZK(m.populace);
-    var perK = m.obj_per_1k == null ? '—' : fmtNum(m.obj_per_1k, 2);
-    return '<tr>' +
-      '<td>' + (i+1) + '</td><td><strong>' + m.mesto_norm + '</strong></td>' +
-      '<td class="numeric">' + fmtCZK(m.pocet) + '</td>' +
-      '<td class="numeric">' + fmtNum(m.podil_pocet, 2) + ' %</td>' +
-      '<td class="numeric">' + fmtCZK(m.obrat) + '</td>' +
-      '<td class="numeric"><span class="' + dispCmp + '">' + fmtNum(m.podil_obrat, 2) + ' %</span></td>' +
-      '<td class="numeric">' + fmtCZK(m.avg_kosik) + '</td>' +
-      '<td class="numeric"><span class="' + idxColor + '">' + fmtNum(idx, 1) + '</span></td>' +
-      '<td class="numeric">' + pop + '</td>' +
-      '<td class="numeric">' + perK + '</td>' +
-      '<td class="numeric">' + satTxt + '</td>' +
-    '</tr>';
-  }).join('');
+  // ── MĚSTA s tříděním + barevná saturace na třetiny ──
+  var mestaState = { col: 'pocet', dir: 'desc' };
+
+  function renderMesta() {
+    var rows = DATA.topMesta.slice();
+    var col = mestaState.col, dir = mestaState.dir;
+    rows.sort(function(a, b) {
+      var av = a[col], bv = b[col];
+      // null jde dolů
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'string') return dir === 'asc' ? av.localeCompare(bv, 'cs') : bv.localeCompare(av, 'cs');
+      return dir === 'asc' ? av - bv : bv - av;
+    });
+
+    // Saturace třetiny (podle aktuálních dat ve viditelných řádcích)
+    var sats = rows.map(function(r) { return r.saturace_index; }).filter(function(v) { return v != null; });
+    sats.sort(function(a, b) { return a - b; });
+    var t1 = sats[Math.floor(sats.length / 3)];
+    var t2 = sats[Math.floor(sats.length * 2 / 3)];
+    function satClass(v) {
+      if (v == null) return '';
+      if (v <= t1) return 'sat-low';
+      if (v <= t2) return 'sat-mid';
+      return 'sat-high';
+    }
+
+    document.getElementById('tab-mesta').innerHTML = rows.map(function(m, i) {
+      var idx = m.kosik_index, idxColor = idx >= 110 ? 'pos' : idx <= 90 ? 'neg' : '';
+      var sat = m.saturace_index;
+      var satTxt = sat == null ? '—' : fmtNum(sat, 2) + '×';
+      var dispCmp = m.podil_obrat > m.podil_pocet ? 'pos' : m.podil_obrat < m.podil_pocet ? 'neg' : '';
+      var pop = m.populace == null ? '—' : fmtCZK(m.populace);
+      var perK = m.obj_per_1k == null ? '—' : fmtNum(m.obj_per_1k, 2);
+      return '<tr>' +
+        '<td>' + (i+1) + '</td><td><strong>' + m.mesto_norm + '</strong></td>' +
+        '<td class="numeric">' + fmtCZK(m.pocet) + '</td>' +
+        '<td class="numeric">' + fmtNum(m.podil_pocet, 2) + ' %</td>' +
+        '<td class="numeric">' + fmtCZK(m.obrat) + '</td>' +
+        '<td class="numeric"><span class="' + dispCmp + '">' + fmtNum(m.podil_obrat, 2) + ' %</span></td>' +
+        '<td class="numeric">' + fmtCZK(m.avg_kosik) + '</td>' +
+        '<td class="numeric"><span class="' + idxColor + '">' + fmtNum(idx, 1) + '</span></td>' +
+        '<td class="numeric">' + pop + '</td>' +
+        '<td class="numeric">' + perK + '</td>' +
+        '<td class="numeric ' + satClass(sat) + '">' + satTxt + '</td>' +
+      '</tr>';
+    }).join('');
+
+    // Update sort indicators
+    document.querySelectorAll('#mesta-table .sortable-th').forEach(function(th) {
+      th.classList.remove('sorted-asc', 'sorted-desc');
+      if (th.dataset.sort === col) th.classList.add('sorted-' + dir);
+    });
+  }
+
+  document.querySelectorAll('#mesta-table .sortable-th').forEach(function(th) {
+    th.addEventListener('click', function() {
+      var col = th.dataset.sort;
+      if (mestaState.col === col) {
+        mestaState.dir = mestaState.dir === 'desc' ? 'asc' : 'desc';
+      } else {
+        mestaState.col = col;
+        mestaState.dir = (col === 'mesto_norm') ? 'asc' : 'desc';
+      }
+      renderMesta();
+    });
+  });
+
+  renderMesta();
 }
 
 // Spuštění login flow po definici všeho

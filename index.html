@@ -415,15 +415,6 @@ footer { text-align: center; padding: 24px; color: var(--text-muted); font-size:
 </div>
 
 <div class="card">
-  <h3>B2C vs B2B podle typu dopravy</h3>
-  <p class="note">Procento objednávek daného segmentu, které používají daný typ dopravy. Pomáhá identifikovat preferenci firem vs. domácností.</p>
-  <table id="doprava-b2b-table">
-    <thead><tr><th>Typ dopravy</th><th class="numeric">B2C %</th><th class="numeric">B2B %</th></tr></thead>
-    <tbody id="tab-doprava-b2b"></tbody>
-  </table>
-</div>
-
-<div class="card">
   <h3>Doprava × Den v týdnu (počet objednávek)</h3>
   <p class="note">Kdo si kdy objednává jakou dopravu? Heatmapa: tmavší = víc objednávek.</p>
   <div id="doprava-dow-heatmap" style="overflow-x:auto;"></div>
@@ -999,12 +990,6 @@ function loadDashboard() {
         '<td class="numeric ' + cls + '">' + fmtNum(r.rr, 1) + ' %</td>' +
       '</tr>';
     }, 'rr', 'desc');
-
-    document.getElementById('tab-doprava-b2b').innerHTML = DATA.dopravaB2B.map(function(b){
-      return '<tr><td><strong>' + b.typ + '</strong></td>' +
-        '<td class="numeric">' + fmtNum(b.b2c, 1) + ' %</td>' +
-        '<td class="numeric">' + fmtNum(b.b2b, 1) + ' %</td></tr>';
-    }).join('');
 
     // Doprava × Den v týdnu heatmapa
     var dow = DATA.dopravaDow;
